@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B100D">
+<title>Green Sighting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#0B100D; --panel:#141B16; --panel-2:#1F2921; --ink:#EAF0E6; --soft:#9DAA9F; --rule:#2F3B32;
+  --accent:#FF7A3D; --accent-ink:#1A0E07; --good:#6FC08E; --warn:#E3A24A; --bad:#FF8A80;
+  --f-display:"Barlow Semi Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--f-display);-webkit-user-select:none;user-select:none}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}
+#view{position:relative;flex:1 1 auto;min-height:38vh;overflow:hidden;background:#000}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+.cross{position:absolute;inset:0;pointer-events:none}
+.cross::before,.cross::after{content:"";position:absolute;background:var(--accent);box-shadow:0 0 0 1px rgba(0,0,0,.55)}
+.cross::before{left:50%;top:0;bottom:0;width:1px;transform:translateX(-.5px)}
+.cross::after{top:50%;left:0;right:0;height:1px;transform:translateY(-.5px)}
+.ring{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border:1px solid var(--accent);border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
+#hud{position:absolute;left:12px;right:12px;top:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;pointer-events:none}
+.readout{background:rgba(11,16,13,.78);border:1px solid var(--rule);border-radius:8px;padding:6px 10px}
+.readout .lbl{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--soft)}
+#ang{font-family:var(--f-mono);font-size:2rem;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.1}
+#steady{font-family:var(--f-mono);font-size:.8rem}
+.ok{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+#zoom{position:absolute;right:12px;bottom:10px;display:flex;gap:6px}
+#zoom button{font-family:var(--f-mono);font-size:.85rem;width:44px;height:36px;border-radius:6px;border:1px solid var(--rule);background:rgba(11,16,13,.78);color:var(--ink)}
+#zoom button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+#panel{flex:0 0 auto;max-height:60vh;overflow-y:auto;background:var(--panel);border-top:1px solid var(--rule);padding:12px 16px 16px;display:grid;gap:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+.fld{display:flex;flex-direction:column;gap:3px;flex:1 1 90px;min-width:0}
+.fld label{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--soft)}
+select{font:inherit;font-size:1.05rem;font-weight:600;color:var(--ink);background:var(--panel-2);border:1px solid var(--rule);border-radius:6px;padding:8px;min-height:44px;width:100%}
+button{font-family:var(--f-display);font-weight:700;font-size:1.05rem;letter-spacing:.02em;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn{min-height:52px;padding:0 14px;border-radius:8px;border:1px solid var(--rule);background:var(--panel-2);color:var(--ink);flex:1 1 0}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);flex:2 1 0}
+.btn:disabled{opacity:.4}
+.btn:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.status{font-family:var(--f-mono);font-size:.78rem;color:var(--soft);min-height:1.2em}
+table{width:100%;border-collapse:collapse;font-family:var(--f-mono);font-size:.85rem;font-variant-numeric:tabular-nums}
+td{padding:5px 4px;border-bottom:1px dotted var(--rule)}
+td.num{text-align:right}
+td.x{text-align:right;width:40px}
+td.x button{background:none;border:none;color:var(--soft);font-size:1rem;padding:4px 8px}
+.muted{color:var(--soft)}
+#start{position:fixed;inset:0;z-index:10;background:var(--bg);display:flex;flex-direction:column;justify-content:center;gap:16px;padding:24px max(16px,env(safe-area-inset-left,0px))}
+#start h1{font-size:2rem;margin:0}
+#start p{font-family:var(--f-mono);font-size:.85rem;line-height:1.5;color:var(--soft);margin:0;max-width:60ch}
+#start .btn{flex:0 0 auto}
+</style>
+</head>
+<body>
+<div id="start">
+  <h1>Green Sighting</h1>
+  <p>Measures horizontal angles only, clockwise from the reference you zero on. Hold the phone upright, stand directly over the station, and put the crosshair on each target.</p>
+  <p>Practice-green testing only. Needs camera and motion access.</p>
+  <button class="btn primary" id="go">Start camera and motion</button>
+  <p id="startMsg" class="bad"></p>
+</div>
+
+<div id="view">
+  <video id="cam" playsinline muted autoplay></video>
+  <div class="cross"></div><div class="ring"></div>
+  <div id="hud">
+    <div class="readout"><div class="lbl" id="angLbl">Not zeroed</div><div id="ang">–</div></div>
+    <div class="readout"><div class="lbl">Steadiness</div><div id="steady">–</div></div>
+  </div>
+  <div id="zoom">
+    <button data-z="1" aria-pressed="true">1×</button><button data-z="2" aria-pressed="false">2×</button><button data-z="4" aria-pressed="false">4×</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="row">
+    <div class="fld"><label for="set">Test</label><select id="set"><option value="course">Practice green</option><option value="yard">Backyard</option></select></div>
+    <div class="fld"><label for="stn">Station</label><select id="stn"><option>L1</option><option>L2</option></select></div>
+    <div class="fld"><label for="tgt">Next target</label><select id="tgt"></select></div>
+  </div>
+  <div class="row">
+    <button class="btn" id="zero">Zero on reference</button>
+    <button class="btn primary" id="cap" disabled>Capture</button>
+  </div>
+  <div class="row">
+    <button class="btn" id="resight" disabled>Re-sight reference</button>
+    <button class="btn" id="copy">Copy for fieldbook</button>
+  </div>
+  <div class="status" id="status"></div>
+  <table><tbody id="list"></tbody></table>
+  <div class="row"><button class="btn" id="clear">Clear this station</button></div>
+</div>
+
+<script>
+const KEY = "green-sighting-v1";
+const SETS = {
+  course: ["S1","S2","S3","S4","S5","S6","S7","S8","S9","S10","S11","S12","G1","G2","G3","G4"],
+  yard: ["B1","B2","B3","B4","B5","B6"]
+};
+let store = {set:"course", stn:"L1", data:{}};   // data[set][stn] = {angles:{}, spread:{}, resight:null}
+try{ const s = JSON.parse(localStorage.getItem(KEY) || "null"); if(s && s.data) store = s; }catch(e){}
+const save = () => { try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){} };
+const other = stn => stn === "L1" ? "L2" : "L1";
+const cur = () => { store.data[store.set] = store.data[store.set] || {}; return store.data[store.set][store.stn] = store.data[store.set][store.stn] || {angles:{}, spread:{}, resight:null}; };
+
+/* ---- Heading of the rear camera's line of sight, from device orientation.
+   Rotation R = Rz(alpha)·Rx(beta)·Ry(gamma); the rear camera looks along −z of the device.
+   Heading = clockwise angle of that line in the horizontal plane. Tilt is never shown. */
+const D = Math.PI/180;
+function camHeading(a, b, g){
+  const cA=Math.cos(a*D), sA=Math.sin(a*D), cB=Math.cos(b*D), sB=Math.sin(b*D), cG=Math.cos(g*D), sG=Math.sin(g*D);
+  const vx = -(cA*sG + cG*sA*sB), vy = -(sA*sG - cA*cG*sB);
+  if(Math.hypot(vx, vy) < 0.2) return null;      // pointing nearly straight up or down
+  return ((Math.atan2(vx, vy)/D) + 360) % 360;
+}
+const samples = [];   // {t, h}
+let zeroH = null;
+window.addEventListener("deviceorientation", e => {
+  if(e.alpha === null) return;
+  const h = camHeading(e.alpha, e.beta, e.gamma);
+  if(h === null) return;
+  const t = performance.now();
+  samples.push({t, h});
+  while(samples.length && t - samples[0].t > 1500) samples.shift();
+});
+function circMean(hs){
+  let x = 0, y = 0; hs.forEach(h => { x += Math.cos(h*D); y += Math.sin(h*D); });
+  return ((Math.atan2(y, x)/D) + 360) % 360;
+}
+const diff = (a, b) => { let d = ((a - b) % 360 + 540) % 360 - 180; return d; };
+function window600(){
+  const t = performance.now();
+  const hs = samples.filter(s => t - s.t <= 600).map(s => s.h);
+  if(hs.length < 5) return null;
+  const m = circMean(hs);
+  const spread = Math.max(...hs.map(h => Math.abs(diff(h, m))));
+  return {m, spread};
+}
+const rel = h => ((h - zeroH) % 360 + 360) % 360;
+
+/* ---- UI ---- */
+const $ = id => document.getElementById(id);
+function targets(){ return [other(store.stn), ...SETS[store.set]]; }
+function fillTargets(keep){
+  const done = cur().angles;
+  const list = targets();
+  const prev = keep ? $("tgt").value : null;
+  $("tgt").innerHTML = list.map(t => `<option value="${t}">${t}${done[t] !== undefined ? " ✓" : ""}</option>`).join("");
+  const next = (prev && list.includes(prev)) ? prev : (list.find(t => done[t] === undefined) || list[0]);
+  $("tgt").value = next;
+}
+function renderList(){
+  const c = cur();
+  const rows = targets().filter(t => c.angles[t] !== undefined).map(t =>
+    `<tr><td>${t}</td><td class="num">${c.angles[t].toFixed(1)}°</td><td class="num muted">±${(c.spread[t] ?? 0).toFixed(2)}</td><td class="x"><button data-del="${t}" aria-label="Delete ${t}">✕</button></td></tr>`);
+  if(c.resight !== null) rows.push(`<tr><td>Reference re-sight</td><td class="num">${diff(c.resight, 0).toFixed(1)}°</td><td class="num muted">drift</td><td class="x"><button data-del="__resight" aria-label="Delete re-sight">✕</button></td></tr>`);
+  $("list").innerHTML = rows.join("") || `<tr><td class="muted">No captures at ${store.stn} yet.</td></tr>`;
+}
+function refresh(keep){ $("set").value = store.set; $("stn").value = store.stn; fillTargets(keep); renderList(); }
+function status(msg, cls){ $("status").className = "status " + (cls || ""); $("status").textContent = msg; }
+
+function frame(){
+  const w = window600();
+  if(w){
+    $("steady").textContent = "±" + w.spread.toFixed(2) + "°";
+    $("steady").className = w.spread <= 0.3 ? "ok" : w.spread <= 0.8 ? "warn" : "bad";
+    $("ang").textContent = zeroH === null ? "–" : rel(w.m).toFixed(1) + "°";
+  }
+  requestAnimationFrame(frame);
+}
+
+$("go").addEventListener("click", async () => {
+  $("startMsg").textContent = "";
+  try{
+    if(typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function"){
+      const r = await DeviceOrientationEvent.requestPermission();
+      if(r !== "granted") throw new Error("Motion access was refused. Allow it in Settings › Safari › Motion & Orientation Access, then reload.");
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}}, audio:false});
+    $("cam").srcObject = stream;
+    try{ await navigator.wakeLock.request("screen"); }catch(e){}
+    $("start").hidden = true;
+    requestAnimationFrame(frame);
+    setTimeout(() => { if(!samples.length) status("No motion readings yet. This phone or browser may not provide them.", "bad"); }, 2000);
+  }catch(e){
+    $("startMsg").textContent = e.message || "Couldn't start the camera. Check camera permission and reload.";
+  }
+});
+
+$("zoom").addEventListener("click", e => {
+  const b = e.target.closest("button[data-z]"); if(!b) return;
+  $("cam").style.transform = `scale(${b.dataset.z})`;
+  document.querySelectorAll("#zoom button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+});
+
+$("zero").addEventListener("click", () => {
+  const w = window600();
+  if(!w){ status("Hold still a moment, then zero again.", "warn"); return; }
+  zeroH = w.m;
+  $("angLbl").textContent = `From reference · ${store.stn}`;
+  $("cap").disabled = false; $("resight").disabled = false;
+  status(`Zeroed on the reference (steadiness ±${w.spread.toFixed(2)}°).`, w.spread > 0.8 ? "warn" : "ok");
+});
+$("cap").addEventListener("click", () => {
+  const w = window600(); if(!w || zeroH === null) return;
+  const t = $("tgt").value, c = cur();
+  c.angles[t] = Math.round(rel(w.m)*10)/10; c.spread[t] = Math.round(w.spread*100)/100; save();
+  status(`${t}: ${c.angles[t].toFixed(1)}°` + (w.spread > 0.8 ? " — unsteady, consider recapturing" : ""), w.spread > 0.8 ? "warn" : "ok");
+  if(navigator.vibrate) navigator.vibrate(30);
+  const list = targets(); const i = list.indexOf(t);
+  fillTargets(false);
+  const nxt = list.slice(i+1).find(x => c.angles[x] === undefined); if(nxt) $("tgt").value = nxt;
+  renderList();
+});
+$("resight").addEventListener("click", () => {
+  const w = window600(); if(!w || zeroH === null) return;
+  cur().resight = Math.round(rel(w.m)*10)/10; save(); renderList();
+  status(`Reference re-sight: ${diff(cur().resight, 0).toFixed(1)}° drift since zeroing.`, Math.abs(diff(cur().resight,0)) > 1 ? "warn" : "ok");
+});
+$("list").addEventListener("click", e => {
+  const b = e.target.closest("button[data-del]"); if(!b) return;
+  const c = cur();
+  if(b.dataset.del === "__resight") c.resight = null; else { delete c.angles[b.dataset.del]; delete c.spread[b.dataset.del]; }
+  save(); refresh(true);
+});
+let clearArmed = false;
+$("clear").addEventListener("click", () => {
+  if(!clearArmed){ clearArmed = true; $("clear").textContent = "Tap again to clear " + store.stn; setTimeout(() => { clearArmed = false; $("clear").textContent = "Clear this station"; }, 3000); return; }
+  const c = cur(); c.angles = {}; c.spread = {}; c.resight = null; save(); clearArmed = false; $("clear").textContent = "Clear this station"; refresh(false);
+});
+function onStationChange(){
+  store.set = $("set").value; store.stn = $("stn").value; save();
+  zeroH = null; $("cap").disabled = true; $("resight").disabled = true;
+  $("angLbl").textContent = "Not zeroed"; $("ang").textContent = "–";
+  status(`Now at ${store.stn}. Zero on the reference before capturing.`, "warn");
+  refresh(false);
+}
+$("set").addEventListener("change", onStationChange);
+$("stn").addEventListener("change", onStationChange);
+
+$("copy").addEventListener("click", async () => {
+  const d = store.data[store.set] || {};
+  const out = ["L1","L2"].filter(s => d[s] && (Object.keys(d[s].angles).length || d[s].resight !== null))
+    .map(s => ({tool:"green-sighting", v:1, test:store.set, station:s, angles:d[s].angles, spread:d[s].spread, resight:d[s].resight}));
+  if(!out.length){ status("Nothing captured yet.", "warn"); return; }
+  const text = JSON.stringify(out);
+  try{ await navigator.clipboard.writeText(text); status(`Copied ${out.map(o => o.station).join(" + ")}. Paste it into the fieldbook's sighting step.`, "ok"); }
+  catch(e){ status("Couldn't copy automatically. Long-press to select: " + text, "warn"); }
+});
+
+refresh(false);
+status("Zero on the reference before capturing.");
+</script>
+</body>
+</html>
