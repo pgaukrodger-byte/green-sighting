@@ -64,6 +64,7 @@ td.x button{background:none;border:none;color:var(--soft);font-size:1rem;padding
 <div id="start">
   <h1>Green Sighting</h1>
   <p>Measures horizontal angles only, clockwise from the reference you zero on. Hold the phone upright, stand directly over the station, and put the crosshair on each target.</p>
+  <p>Re-sight the reference every 5–6 captures and at the end. Each re-sight measures the gyro drift, and the angles are corrected for it.</p>
   <p>Practice-green testing only. Needs camera and motion access.</p>
   <button class="btn primary" id="go">Start camera and motion</button>
   <p id="startMsg" class="bad"></p>
@@ -110,7 +111,7 @@ let store = {set:"course", stn:"L1", data:{}};   // data[set][stn] = {angles:{},
 try{ const s = JSON.parse(localStorage.getItem(KEY) || "null"); if(s && s.data) store = s; }catch(e){}
 const save = () => { try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){} };
 const other = stn => stn === "L1" ? "L2" : "L1";
-const cur = () => { store.data[store.set] = store.data[store.set] || {}; return store.data[store.set][store.stn] = store.data[store.set][store.stn] || {angles:{}, spread:{}, resight:null}; };
+const cur = () => { store.data[store.set] = store.data[store.set] || {}; return store.data[store.set][store.stn] = store.data[store.set][store.stn] || {angles:{}, spread:{}, times:{}, resights:[], resight:null}; };
 
 /* ---- Heading of the rear camera's line of sight, from device orientation.
    Rotation R = Rz(alpha)·Rx(beta)·Ry(gamma); the rear camera looks along −z of the device.
@@ -147,6 +148,25 @@ function window600(){
 }
 const rel = h => ((h - zeroH) % 360 + 360) % 360;
 
+/* ---- Drift correction ----
+   Every capture and re-sight stores its time since zeroing. The reference should read 0°, so each
+   re-sight measures the gyro drift at that moment. Drift is taken as 0 at zeroing, joined linearly
+   between re-sights, and held at the last value after it. Corrected angle = raw − drift(t). */
+function driftAt(c, t){
+  const pts = [{t:0, v:0}, ...(c.resights || [])].sort((a, b) => a.t - b.t);
+  if(pts.length < 2) return 0;
+  for(let i = 1; i < pts.length; i++){
+    if(t <= pts[i].t){ const a = pts[i-1], b = pts[i]; return b.t === a.t ? b.v : a.v + (b.v - a.v)*(t - a.t)/(b.t - a.t); }
+  }
+  return pts[pts.length-1].v;
+}
+const norm = a => Math.round((((a % 360) + 360) % 360)*10)/10;
+function corrected(c, k){
+  const raw = c.angles[k]; const t = (c.times || {})[k];
+  return t === undefined ? raw : norm(raw - driftAt(c, t));
+}
+const mmss = ms => { const s = Math.round(ms/1000); return Math.floor(s/60) + ":" + String(s % 60).padStart(2, "0"); };
+
 /* ---- UI ---- */
 const $ = id => document.getElementById(id);
 function targets(){ return [other(store.stn), ...SETS[store.set]]; }
@@ -159,10 +179,18 @@ function fillTargets(keep){
   $("tgt").value = next;
 }
 function renderList(){
-  const c = cur();
-  const rows = targets().filter(t => c.angles[t] !== undefined).map(t =>
-    `<tr><td>${t}</td><td class="num">${c.angles[t].toFixed(1)}°</td><td class="num muted">±${(c.spread[t] ?? 0).toFixed(2)}</td><td class="x"><button data-del="${t}" aria-label="Delete ${t}">✕</button></td></tr>`);
-  if(c.resight !== null) rows.push(`<tr><td>Reference re-sight</td><td class="num">${diff(c.resight, 0).toFixed(1)}°</td><td class="num muted">drift</td><td class="x"><button data-del="__resight" aria-label="Delete re-sight">✕</button></td></tr>`);
+  const c = cur(); c.resights = c.resights || [];
+  const hasRs = c.resights.length > 0;
+  const items = targets().filter(t => c.angles[t] !== undefined).map(t => ({kind:"cap", k:t, t:(c.times||{})[t] ?? -1}));
+  c.resights.forEach((r, i) => items.push({kind:"rs", i, t:r.t}));
+  items.sort((a, b) => a.t - b.t);
+  const rows = items.map(it => {
+    if(it.kind === "rs"){ const r = c.resights[it.i];
+      return `<tr class="rs"><td>Re-sight R <span class="muted">${mmss(r.t)}</span></td><td class="num">${r.v >= 0 ? "+" : ""}${r.v.toFixed(1)}°</td><td class="num muted">drift</td><td class="x"><button data-rs="${it.i}" aria-label="Delete re-sight">✕</button></td></tr>`; }
+    const k = it.k, cv = corrected(c, k), raw = c.angles[k];
+    const rawNote = hasRs && Math.abs(diff(cv, raw)) >= 0.05 ? ` <span class="muted">raw ${raw.toFixed(1)}</span>` : "";
+    return `<tr><td>${k}${it.t >= 0 ? ` <span class="muted">${mmss(it.t)}</span>` : ""}</td><td class="num">${cv.toFixed(1)}°${rawNote}</td><td class="num muted">±${(c.spread[k] ?? 0).toFixed(2)}</td><td class="x"><button data-del="${k}" aria-label="Delete ${k}">✕</button></td></tr>`;
+  });
   $("list").innerHTML = rows.join("") || `<tr><td class="muted">No captures at ${store.stn} yet.</td></tr>`;
 }
 function refresh(keep){ $("set").value = store.set; $("stn").value = store.stn; fillTargets(keep); renderList(); }
@@ -202,19 +230,33 @@ $("zoom").addEventListener("click", e => {
   document.querySelectorAll("#zoom button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
 });
 
+// Zeroing starts a new set: captures from an earlier zero can't be mixed with this one.
+let zeroArmed = false;
 $("zero").addEventListener("click", () => {
   const w = window600();
   if(!w){ status("Hold still a moment, then zero again.", "warn"); return; }
+  const c = cur();
+  const has = Object.keys(c.angles).length || (c.resights || []).length;
+  if(has && !zeroArmed){
+    zeroArmed = true; $("zero").textContent = "Tap again: clears " + store.stn;
+    status(`Zeroing again starts a new set and clears the ${store.stn} captures.`, "warn");
+    setTimeout(() => { zeroArmed = false; $("zero").textContent = "Zero on reference"; }, 3000);
+    return;
+  }
+  zeroArmed = false; $("zero").textContent = "Zero on reference";
+  c.angles = {}; c.spread = {}; c.times = {}; c.resights = []; c.resight = null; c.zeroAt = Date.now(); save();
   zeroH = w.m;
   $("angLbl").textContent = `From reference · ${store.stn}`;
   $("cap").disabled = false; $("resight").disabled = false;
-  status(`Zeroed on the reference (steadiness ±${w.spread.toFixed(2)}°).`, w.spread > 0.8 ? "warn" : "ok");
+  status(`Zeroed on the reference (steadiness ±${w.spread.toFixed(2)}°). Re-sight R every 5–6 captures and at the end.`, w.spread > 0.8 ? "warn" : "ok");
+  refresh(false);
 });
 $("cap").addEventListener("click", () => {
   const w = window600(); if(!w || zeroH === null) return;
-  const t = $("tgt").value, c = cur();
-  c.angles[t] = Math.round(rel(w.m)*10)/10; c.spread[t] = Math.round(w.spread*100)/100; save();
-  status(`${t}: ${c.angles[t].toFixed(1)}°` + (w.spread > 0.8 ? " — unsteady, consider recapturing" : ""), w.spread > 0.8 ? "warn" : "ok");
+  const t = $("tgt").value, c = cur(); c.times = c.times || {};
+  c.angles[t] = Math.round(rel(w.m)*10)/10; c.spread[t] = Math.round(w.spread*100)/100; c.times[t] = Date.now() - c.zeroAt; save();
+  const since = (c.resights || []).length ? Object.values(c.times).filter(x => x > c.resights[c.resights.length-1].t).length : Object.keys(c.times).length;
+  status(`${t}: ${c.angles[t].toFixed(1)}°` + (w.spread > 0.8 ? " — unsteady, consider recapturing" : since >= 6 ? " · time to re-sight R" : ""), w.spread > 0.8 || since >= 6 ? "warn" : "ok");
   if(navigator.vibrate) navigator.vibrate(30);
   const list = targets(); const i = list.indexOf(t);
   fillTargets(false);
@@ -223,19 +265,23 @@ $("cap").addEventListener("click", () => {
 });
 $("resight").addEventListener("click", () => {
   const w = window600(); if(!w || zeroH === null) return;
-  cur().resight = Math.round(rel(w.m)*10)/10; save(); renderList();
-  status(`Reference re-sight: ${diff(cur().resight, 0).toFixed(1)}° drift since zeroing.`, Math.abs(diff(cur().resight,0)) > 1 ? "warn" : "ok");
+  const c = cur(); c.resights = c.resights || [];
+  const v = Math.round(diff(rel(w.m), 0)*10)/10;
+  c.resights.push({t: Date.now() - c.zeroAt, v}); c.resight = v; save(); renderList();
+  status(`Re-sight: ${v >= 0 ? "+" : ""}${v.toFixed(1)}° drift since zeroing. Angles are corrected for it.`, Math.abs(v) > 1 ? "warn" : "ok");
 });
 $("list").addEventListener("click", e => {
-  const b = e.target.closest("button[data-del]"); if(!b) return;
   const c = cur();
-  if(b.dataset.del === "__resight") c.resight = null; else { delete c.angles[b.dataset.del]; delete c.spread[b.dataset.del]; }
+  const r = e.target.closest("button[data-rs]");
+  if(r){ c.resights.splice(Number(r.dataset.rs), 1); c.resight = c.resights.length ? c.resights[c.resights.length-1].v : null; save(); refresh(true); return; }
+  const b = e.target.closest("button[data-del]"); if(!b) return;
+  delete c.angles[b.dataset.del]; delete c.spread[b.dataset.del]; if(c.times) delete c.times[b.dataset.del];
   save(); refresh(true);
 });
 let clearArmed = false;
 $("clear").addEventListener("click", () => {
   if(!clearArmed){ clearArmed = true; $("clear").textContent = "Tap again to clear " + store.stn; setTimeout(() => { clearArmed = false; $("clear").textContent = "Clear this station"; }, 3000); return; }
-  const c = cur(); c.angles = {}; c.spread = {}; c.resight = null; save(); clearArmed = false; $("clear").textContent = "Clear this station"; refresh(false);
+  const c = cur(); c.angles = {}; c.spread = {}; c.times = {}; c.resights = []; c.resight = null; save(); clearArmed = false; $("clear").textContent = "Clear this station"; refresh(false);
 });
 function onStationChange(){
   store.set = $("set").value; store.stn = $("stn").value; save();
@@ -249,11 +295,15 @@ $("stn").addEventListener("change", onStationChange);
 
 $("copy").addEventListener("click", async () => {
   const d = store.data[store.set] || {};
-  const out = ["L1","L2"].filter(s => d[s] && (Object.keys(d[s].angles).length || d[s].resight !== null))
-    .map(s => ({tool:"green-sighting", v:1, test:store.set, station:s, angles:d[s].angles, spread:d[s].spread, resight:d[s].resight}));
+  const out = ["L1","L2"].filter(s => d[s] && (Object.keys(d[s].angles).length || (d[s].resights || []).length))
+    .map(s => {
+      const c = d[s]; const ang = {};
+      Object.keys(c.angles).forEach(k => { ang[k] = corrected(c, k); });
+      return {tool:"green-sighting", v:2, test:store.set, station:s, angles:ang, raw:c.angles, times:c.times || {}, resights:c.resights || [], spread:c.spread, resight:c.resight};
+    });
   if(!out.length){ status("Nothing captured yet.", "warn"); return; }
   const text = JSON.stringify(out);
-  try{ await navigator.clipboard.writeText(text); status(`Copied ${out.map(o => o.station).join(" + ")}. Paste it into the fieldbook's sighting step.`, "ok"); }
+  try{ await navigator.clipboard.writeText(text); status(`Copied ${out.map(o => o.station).join(" + ")} (drift-corrected). Paste it into the fieldbook's sighting step.`, "ok"); }
   catch(e){ status("Couldn't copy automatically. Long-press to select: " + text, "warn"); }
 });
 
